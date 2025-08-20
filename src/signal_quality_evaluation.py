@@ -7,6 +7,8 @@ from multiprocessing import Pool
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from src.config import DATASET_DIR, logger
+from biosppy.signals.ecg import ecg
+from biosppy.quality import quality_ecg
 
 
 def load_ecg_file(filepath: str) -> pd.Series | None:
@@ -22,9 +24,15 @@ def load_ecg_file(filepath: str) -> pd.Series | None:
     return df["ecg"]
 
 
-def clean_signal(signal: pd.Series, sampling_rate: int = 130) -> np.ndarray:
-    """Cleans the ECG signal."""
+def clean_signal_neurokit(signal: pd.Series, sampling_rate: int) -> np.ndarray:
+    """Cleans the ECG signal using NeuroKit's built in method."""
     return np.array(nk.ecg_clean(signal, sampling_rate=sampling_rate))
+
+
+def clean_signal_biosppy(signal: pd.Series, sampling_rate: int) -> np.ndarray:
+    """Cleans the ECG signal using BioSPPy's built in method."""
+    _, cleaned_signal, *_ = ecg(signal=signal.to_numpy(), sampling_rate=sampling_rate, show=False)
+    return cleaned_signal
 
 
 def calculate_quality(signal: np.ndarray, sampling_rate: int, method: str) -> float | str | None:
@@ -39,13 +47,23 @@ def calculate_quality(signal: np.ndarray, sampling_rate: int, method: str) -> fl
         return None
 
 
-def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict:
-    """Evaluates signal quality using multiple methods."""
-    cleaned = clean_signal(signal, sampling_rate)
-    methods = ["zhao2018", "averageQRS", "templatematch"]
-    results = {}
-    for method in methods:
-        results[method] = calculate_quality(cleaned, sampling_rate, method)
+def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict[str, dict[str, float | str | None]]:
+    """Evaluates signal quality using multiple methods from NeuroKit and BioSPPy libraries."""
+    results = {"NeuroKit": {}, "BioSPPy": {}}
+
+    neurokit_cleaned = clean_signal_neurokit(signal, sampling_rate)
+    neurokit_methods = ["zhao2018", "averageQRS", "templatematch"]
+
+    biosppy_cleaned = clean_signal_biosppy(signal, sampling_rate)
+    biosppy_methods = ['Level3', 'pSQI', 'kSQI', 'fSQI']
+
+    for method in neurokit_methods:
+        results["NeuroKit"][method] = calculate_quality(neurokit_cleaned, sampling_rate, method)
+
+    values, names = quality_ecg(segment=biosppy_cleaned, methods=biosppy_methods, sampling_rate=sampling_rate, verbose=False)
+    for value, name in zip(values, names):
+        results["BioSPPy"][name] = value
+
     return results
 
 
@@ -57,7 +75,7 @@ def process_session(session_path: str) -> dict:
         return {}
 
     ecg_signal = load_ecg_file(ecg_file)
-    if ecg_signal is None:
+    if ecg_signal is None or len(ecg_signal) < 600:
         logger.warning(f"Invalid ECG signal in {ecg_file}. Skipping session.")
         return {}
 
