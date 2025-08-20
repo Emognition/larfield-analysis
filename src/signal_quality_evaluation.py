@@ -1,13 +1,11 @@
 import json
 import os
-from multiprocessing import Pool
-
 import neurokit2 as nk
 import numpy as np
 import pandas as pd
+from multiprocessing import Pool
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-
 from src.config import DATASET_DIR, logger
 
 
@@ -78,6 +76,7 @@ def unpack_and_process(args):
     """Rozpakowuje argumenty i wywołuje funkcję process_and_save."""
     return process_and_save(*args)
 
+
 def main():
     tasks = []
     for iteration in os.listdir(DATASET_DIR):
@@ -104,7 +103,6 @@ def process_and_save(session_path: str, person_hash: str, session: str):
     logger.debug(f"Processing session: {session} for person: {person_hash}")
     metrics = process_session(session_path)
     save_metrics(session_path, metrics)
-
 
 
 if __name__ == "__main__":

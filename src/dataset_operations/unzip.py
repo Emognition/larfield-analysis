@@ -2,7 +2,7 @@ import pandas as pd
 import datetime
 import logging
 import sys
-from src.dataset_operations.helpers import unzip_archive, remove_dir, extract_uid_from_filepath, extract_iteration_from_filepath
+from src.dataset_operations.helpers import unzip_archive, extract_uid_from_filepath, extract_iteration_from_filepath
 from pathlib import Path
 from tqdm import tqdm
 from multiprocessing import Pool
