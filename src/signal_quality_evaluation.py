@@ -5,6 +5,8 @@ from multiprocessing import Pool
 import neurokit2 as nk
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from src.config import DATASET_DIR, logger
 
@@ -72,6 +74,10 @@ def save_metrics(session_path: str, metrics: dict):
         json.dump(metrics, f, ensure_ascii=False, indent=4)
 
 
+def unpack_and_process(args):
+    """Rozpakowuje argumenty i wywołuje funkcję process_and_save."""
+    return process_and_save(*args)
+
 def main():
     tasks = []
     for iteration in os.listdir(DATASET_DIR):
@@ -88,8 +94,10 @@ def main():
                 session_path = os.path.join(person_path, session)
                 tasks.append((session_path, person_hash, session))
 
-    with Pool(processes=os.cpu_count()) as pool:
-        pool.starmap(process_and_save, tasks)
+    with Pool(processes=os.cpu_count()) as pool, logging_redirect_tqdm():
+        with tqdm(total=len(tasks), desc="Processing tasks", dynamic_ncols=True) as pbar:
+            for _ in pool.imap_unordered(unpack_and_process, tasks):
+                pbar.update(1)
 
 
 def process_and_save(session_path: str, person_hash: str, session: str):
