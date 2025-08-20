@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 
 DATASET_DIR = r"../data/larfield"
-QUALITY_MAPPING = {"Bad": 0, "Medium": 0.5, "Good": 1, "U": 0}
+QUALITY_MAPPING = {"Unacceptable": 0, "Barely acceptable": 0.5, "Excellent": 1}
 
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)

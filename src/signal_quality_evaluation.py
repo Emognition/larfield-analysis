@@ -1,10 +1,12 @@
-import os
 import json
-import pandas as pd
-import numpy as np
-import neurokit2 as nk
+import os
+from multiprocessing import Pool
 
-from src.config import QUALITY_MAPPING, DATASET_DIR, logger
+import neurokit2 as nk
+import numpy as np
+import pandas as pd
+
+from src.config import DATASET_DIR, logger
 
 
 def load_ecg_file(filepath: str) -> pd.Series | None:
@@ -20,25 +22,24 @@ def load_ecg_file(filepath: str) -> pd.Series | None:
     return df["ecg"]
 
 
-def clean_signal(signal: pd.Series, sampling_rate: int = 1000) -> np.ndarray:
+def clean_signal(signal: pd.Series, sampling_rate: int = 130) -> np.ndarray:
     """Cleans the ECG signal."""
     return np.array(nk.ecg_clean(signal, sampling_rate=sampling_rate))
 
 
-def calculate_quality(signal: np.ndarray, sampling_rate: int, method: str) -> float | None:
+def calculate_quality(signal: np.ndarray, sampling_rate: int, method: str) -> float | str | None:
     """Calculates the quality of the signal using the given method."""
     try:
         labels = nk.ecg_quality(signal, sampling_rate=sampling_rate, method=method)
         if isinstance(labels[0], (int, float, np.floating)):
             return float(np.mean(labels))
-        numeric = [QUALITY_MAPPING.get(q, 0) for q in labels]
-        return float(np.mean(numeric))
+        return labels
     except Exception as e:
         logger.error(f"{method}: {e}")
         return None
 
 
-def evaluate_signal(signal: pd.Series, sampling_rate: int = 1000) -> dict:
+def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict:
     """Evaluates signal quality using multiple methods."""
     cleaned = clean_signal(signal, sampling_rate)
     methods = ["zhao2018", "averageQRS", "templatematch"]
@@ -52,10 +53,12 @@ def process_session(session_path: str) -> dict:
     """Processes a single session (sample)."""
     ecg_file = os.path.join(session_path, "ECG.csv")
     if not os.path.isdir(session_path):
+        logger.warning(f"Session path does not exist or is not a directory: {session_path}")
         return {}
 
     ecg_signal = load_ecg_file(ecg_file)
-    if ecg_signal is None or len(ecg_signal) < 2000:
+    if ecg_signal is None:
+        logger.warning(f"Invalid ECG signal in {ecg_file}. Skipping session.")
         return {}
 
     return {"ecg_signal_quality": evaluate_signal(ecg_signal)}
@@ -69,49 +72,24 @@ def save_metrics(session_path: str, metrics: dict):
         json.dump(metrics, f, ensure_ascii=False, indent=4)
 
 
-# def main():
-#     for iteration in os.listdir(DATASET_DIR):
-#         iteration_path = os.path.join(DATASET_DIR, iteration)
-#         if not os.path.isdir(iteration_path):
-#             continue
-#
-#         for person_hash in os.listdir(iteration_path):
-#             person_path = os.path.join(iteration_path, person_hash)
-#             if not os.path.isdir(person_path):
-#                 continue
-#
-#             for session in os.listdir(person_path):
-#                 logger.debug(f"Processing session: {session} for person: {person_hash}")
-#                 session_path = os.path.join(person_path, session)
-#                 metrics = process_session(session_path)
-#                 save_metrics(session_path, metrics)
+def main():
+    tasks = []
+    for iteration in os.listdir(DATASET_DIR):
+        iteration_path = os.path.join(DATASET_DIR, iteration)
+        if not os.path.isdir(iteration_path):
+            continue
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-def main(max_workers: int = 16):
-    futures = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for iteration in os.listdir(DATASET_DIR):
-            iteration_path = os.path.join(DATASET_DIR, iteration)
-            if not os.path.isdir(iteration_path):
+        for person_hash in os.listdir(iteration_path):
+            person_path = os.path.join(iteration_path, person_hash)
+            if not os.path.isdir(person_path):
                 continue
 
-            for person_hash in os.listdir(iteration_path):
-                person_path = os.path.join(iteration_path, person_hash)
-                if not os.path.isdir(person_path):
-                    continue
+            for session in os.listdir(person_path):
+                session_path = os.path.join(person_path, session)
+                tasks.append((session_path, person_hash, session))
 
-                for session in os.listdir(person_path):
-                    session_path = os.path.join(person_path, session)
-                    futures.append(
-                        executor.submit(process_and_save, session_path, person_hash, session)
-                    )
-
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                logger.error(f"Error in worker: {e}")
+    with Pool(processes=os.cpu_count()) as pool:
+        pool.starmap(process_and_save, tasks)
 
 
 def process_and_save(session_path: str, person_hash: str, session: str):
