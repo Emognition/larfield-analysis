@@ -60,9 +60,9 @@ def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict[str, di
     for method in neurokit_methods:
         results["NeuroKit"][method] = calculate_quality(neurokit_cleaned, sampling_rate, method)
 
-    values, names = quality_ecg(segment=biosppy_cleaned, methods=biosppy_methods, sampling_rate=sampling_rate, verbose=False)
-    for value, name in zip(values, names):
-        results["BioSPPy"][name] = value
+    biosppy_results = quality_ecg(segment=biosppy_cleaned, methods=biosppy_methods, sampling_rate=sampling_rate, verbose=False)
+    for i, method in enumerate(biosppy_methods):
+        results["BioSPPy"][method] = biosppy_results[i]
 
     return results
 
