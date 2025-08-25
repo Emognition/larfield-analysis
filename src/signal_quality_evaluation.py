@@ -4,11 +4,14 @@ import neurokit2 as nk
 import numpy as np
 import pandas as pd
 from multiprocessing import Pool
+
+from scipy.signal import butter, filtfilt
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from src.config import DATASET_DIR, logger
 from biosppy.signals.ecg import ecg
 from biosppy.quality import quality_ecg
+
+from src.config import logger, DATASET_DIR
 
 
 def load_ecg_file(filepath: str) -> pd.Series | None:
@@ -46,6 +49,19 @@ def calculate_quality(signal: np.ndarray, sampling_rate: int, method: str) -> fl
         logger.error(f"{method}: {e}")
         return None
 
+def calculate_snr(signal: np.ndarray, sampling_rate: int = 130) -> float:
+    # Filtr pasmowy dla sygnału użytecznego (0.5-40 Hz)
+    b, a = butter(4, [0.5, 40], btype="band", fs=sampling_rate)
+    filtered = filtfilt(b, a, signal)
+
+    # Różnica = szum
+    noise = signal - filtered
+
+    power_signal = np.mean(filtered**2)
+    power_noise = np.mean(noise**2)
+
+    return 10 * np.log10(power_signal / power_noise)
+
 
 def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict[str, dict[str, float | str | None]]:
     """Evaluates signal quality using multiple methods from NeuroKit and BioSPPy libraries."""
@@ -63,6 +79,8 @@ def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict[str, di
     biosppy_results = quality_ecg(segment=biosppy_cleaned, methods=biosppy_methods, sampling_rate=sampling_rate, verbose=False)
     for i, method in enumerate(biosppy_methods):
         results["BioSPPy"][method] = biosppy_results[i]
+
+    results["SNR"] = {"CustomSNR": calculate_snr(signal, sampling_rate)}
 
     return results
 
