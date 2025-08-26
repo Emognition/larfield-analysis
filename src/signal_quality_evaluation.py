@@ -1,14 +1,17 @@
 import json
 import os
-from multiprocessing import Pool
-
 import neurokit2 as nk
 import numpy as np
 import pandas as pd
+from multiprocessing import Pool
+
+from scipy.signal import butter, filtfilt
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+from biosppy.signals.ecg import ecg
+from biosppy.quality import quality_ecg
 
-from src.config import DATASET_DIR, logger
+from src.config import logger, DATASET_DIR
 
 
 def load_ecg_file(filepath: str) -> pd.Series | None:
@@ -24,9 +27,15 @@ def load_ecg_file(filepath: str) -> pd.Series | None:
     return df["ecg"]
 
 
-def clean_signal(signal: pd.Series, sampling_rate: int = 130) -> np.ndarray:
-    """Cleans the ECG signal."""
+def clean_signal_neurokit(signal: pd.Series, sampling_rate: int) -> np.ndarray:
+    """Cleans the ECG signal using NeuroKit's built in method."""
     return np.array(nk.ecg_clean(signal, sampling_rate=sampling_rate))
+
+
+def clean_signal_biosppy(signal: pd.Series, sampling_rate: int) -> np.ndarray:
+    """Cleans the ECG signal using BioSPPy's built in method."""
+    _, cleaned_signal, *_ = ecg(signal=signal.to_numpy(), sampling_rate=sampling_rate, show=False)
+    return cleaned_signal
 
 
 def calculate_quality(signal: np.ndarray, sampling_rate: int, method: str) -> float | str | None:
@@ -40,14 +49,39 @@ def calculate_quality(signal: np.ndarray, sampling_rate: int, method: str) -> fl
         logger.error(f"{method}: {e}")
         return None
 
+def calculate_snr(signal: np.ndarray, sampling_rate: int = 130) -> float:
+    # Filtr pasmowy dla sygnału użytecznego (0.5-40 Hz)
+    b, a = butter(4, [0.5, 40], btype="band", fs=sampling_rate)
+    filtered = filtfilt(b, a, signal)
 
-def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict:
-    """Evaluates signal quality using multiple methods."""
-    cleaned = clean_signal(signal, sampling_rate)
-    methods = ["zhao2018", "averageQRS", "templatematch"]
-    results = {}
-    for method in methods:
-        results[method] = calculate_quality(cleaned, sampling_rate, method)
+    # Różnica = szum
+    noise = signal - filtered
+
+    power_signal = np.mean(filtered**2)
+    power_noise = np.mean(noise**2)
+
+    return 10 * np.log10(power_signal / power_noise)
+
+
+def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict[str, dict[str, float | str | None]]:
+    """Evaluates signal quality using multiple methods from NeuroKit and BioSPPy libraries."""
+    results = {"NeuroKit": {}, "BioSPPy": {}}
+
+    neurokit_cleaned = clean_signal_neurokit(signal, sampling_rate)
+    neurokit_methods = ["zhao2018", "averageQRS", "templatematch"]
+
+    biosppy_cleaned = clean_signal_biosppy(signal, sampling_rate)
+    biosppy_methods = ['Level3', 'pSQI', 'kSQI', 'fSQI']
+
+    for method in neurokit_methods:
+        results["NeuroKit"][method] = calculate_quality(neurokit_cleaned, sampling_rate, method)
+
+    biosppy_results = quality_ecg(segment=biosppy_cleaned, methods=biosppy_methods, sampling_rate=sampling_rate, verbose=False)
+    for i, method in enumerate(biosppy_methods):
+        results["BioSPPy"][method] = biosppy_results[i]
+
+    results["SNR"] = {"CustomSNR": calculate_snr(signal, sampling_rate)}
+
     return results
 
 
@@ -59,7 +93,7 @@ def process_session(session_path: str) -> dict:
         return {}
 
     ecg_signal = load_ecg_file(ecg_file)
-    if ecg_signal is None:
+    if ecg_signal is None or len(ecg_signal) < 600:
         logger.warning(f"Invalid ECG signal in {ecg_file}. Skipping session.")
         return {}
 
@@ -77,6 +111,7 @@ def save_metrics(session_path: str, metrics: dict):
 def unpack_and_process(args):
     """Rozpakowuje argumenty i wywołuje funkcję process_and_save."""
     return process_and_save(*args)
+
 
 def main():
     tasks = []
@@ -104,7 +139,6 @@ def process_and_save(session_path: str, person_hash: str, session: str):
     logger.debug(f"Processing session: {session} for person: {person_hash}")
     metrics = process_session(session_path)
     save_metrics(session_path, metrics)
-
 
 
 if __name__ == "__main__":
