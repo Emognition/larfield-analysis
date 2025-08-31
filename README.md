@@ -72,4 +72,5 @@ Example:
 
 1. Place the **LarField** dataset in the `data/` folder and name it `larfield_zipped`
 2. Unzip the dataset into the `larfield/` folder by running: `python src/dataset_operations/unzip.py`
-3. Evaluate the ECG signal quality using the following script: `python src/signal_quality_evaluation.py`
+3. Enter the ./src directory: `cd ./src`
+4. Evaluate the ECG signal quality using the following script: `python signal_quality_evaluation.py`

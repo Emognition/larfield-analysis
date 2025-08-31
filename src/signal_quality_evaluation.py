@@ -1,17 +1,18 @@
+import argparse
 import json
 import os
+from multiprocessing import Pool
+
 import neurokit2 as nk
 import numpy as np
 import pandas as pd
-from multiprocessing import Pool
-
+from biosppy.quality import quality_ecg
+from biosppy.signals.ecg import ecg
 from scipy.signal import butter, filtfilt
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-from biosppy.signals.ecg import ecg
-from biosppy.quality import quality_ecg
 
-from src.config import logger, DATASET_DIR
+from config import logger, DEFAULT_INPUT, DEFAULT_OUTPUT, DEFAULT_SAMPLING_RATE, DEFAULT_VERBOSE
 
 
 def load_ecg_file(filepath: str) -> pd.Series | None:
@@ -49,12 +50,11 @@ def calculate_quality(signal: np.ndarray, sampling_rate: int, method: str) -> fl
         logger.error(f"{method}: {e}")
         return None
 
+
 def calculate_snr(signal: np.ndarray, sampling_rate: int = 130) -> float:
-    # Filtr pasmowy dla sygnału użytecznego (0.5-40 Hz)
+    """Custom SNR metric for ECG signal."""
     b, a = butter(4, [0.5, 40], btype="band", fs=sampling_rate)
     filtered = filtfilt(b, a, signal)
-
-    # Różnica = szum
     noise = signal - filtered
 
     power_signal = np.mean(filtered**2)
@@ -65,7 +65,7 @@ def calculate_snr(signal: np.ndarray, sampling_rate: int = 130) -> float:
 
 def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict[str, dict[str, float | str | None]]:
     """Evaluates signal quality using multiple methods from NeuroKit and BioSPPy libraries."""
-    results = {"NeuroKit": {}, "BioSPPy": {}}
+    results = {"NeuroKit": {}, "BioSPPy": {}, "SNR": {}}
 
     neurokit_cleaned = clean_signal_neurokit(signal, sampling_rate)
     neurokit_methods = ["zhao2018", "averageQRS", "templatematch"]
@@ -80,7 +80,7 @@ def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict[str, di
     for i, method in enumerate(biosppy_methods):
         results["BioSPPy"][method] = biosppy_results[i]
 
-    results["SNR"] = {"CustomSNR": calculate_snr(signal, sampling_rate)}
+    results["SNR"]["CustomSNR"] = calculate_snr(signal, sampling_rate)
 
     return results
 
@@ -100,23 +100,53 @@ def process_session(session_path: str) -> dict:
     return {"ecg_signal_quality": evaluate_signal(ecg_signal)}
 
 
-def save_metrics(session_path: str, metrics: dict):
-    """Saves the metrics to a JSON file inside a session directory."""
-    output_path = os.path.join(session_path, "metrics.json")
+def save_metrics(output_path: str, metrics: dict):
+    """Saves the metrics to a JSON file."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, ensure_ascii=False, indent=4)
 
 
 def unpack_and_process(args):
-    """Rozpakowuje argumenty i wywołuje funkcję process_and_save."""
     return process_and_save(*args)
 
 
+def process_and_save(session_path: str, person_hash: str, session: str, output_dir: str):
+    logger.debug(f"Processing session: {session} for person: {person_hash}")
+    metrics = process_session(session_path)
+    if metrics:
+        output_path = os.path.join(output_dir, person_hash, session, "metrics.json")
+        save_metrics(output_path, metrics)
+
+
 def main():
+    parser = argparse.ArgumentParser(description="ECG Signal Quality Evaluation Tool")
+    parser.add_argument("--input", default=DEFAULT_INPUT, help=f"Path to dataset directory or single ECG.csv file (default: {DEFAULT_INPUT})")
+    parser.add_argument("--output", default=DEFAULT_OUTPUT, help=f"Path to output directory or output JSON file (default: {DEFAULT_OUTPUT})")
+    parser.add_argument("--sampling-rate", type=int, default=DEFAULT_SAMPLING_RATE, help=f"Sampling rate of ECG (default: {DEFAULT_SAMPLING_RATE})")
+    parser.add_argument("--verbose", action="store_true", default=DEFAULT_VERBOSE, help="Enable debug logging")
+
+    args = parser.parse_args()
+
+    # Ustawienie poziomu logów
+    if args.verbose:
+        logger.setLevel("DEBUG")
+
+    # Tryb pojedynczego pliku
+    if os.path.isfile(args.input):
+        signal = load_ecg_file(args.input)
+        if signal is None:
+            logger.error("Invalid ECG file provided.")
+            return
+        metrics = {"ecg_signal_quality": evaluate_signal(signal, sampling_rate=args.sampling_rate)}
+        save_metrics(args.output, metrics)
+        logger.info(f"Saved metrics to {args.output}")
+        return
+
+    # Tryb datasetu
     tasks = []
-    for iteration in os.listdir(DATASET_DIR):
-        iteration_path = os.path.join(DATASET_DIR, iteration)
+    for iteration in os.listdir(args.input):
+        iteration_path = os.path.join(args.input, iteration)
         if not os.path.isdir(iteration_path):
             continue
 
@@ -127,19 +157,12 @@ def main():
 
             for session in os.listdir(person_path):
                 session_path = os.path.join(person_path, session)
-                tasks.append((session_path, person_hash, session))
+                output_path = os.path.join(args.output, iteration)
+                tasks.append((session_path, person_hash, session, output_path))
 
     with Pool(processes=os.cpu_count()) as pool, logging_redirect_tqdm():
         with tqdm(total=len(tasks), desc="Processing tasks", dynamic_ncols=True) as pbar:
             for _ in pool.imap_unordered(unpack_and_process, tasks):
                 pbar.update(1)
-
-
-def process_and_save(session_path: str, person_hash: str, session: str):
-    logger.debug(f"Processing session: {session} for person: {person_hash}")
-    metrics = process_session(session_path)
-    save_metrics(session_path, metrics)
-
-
 if __name__ == "__main__":
     main()

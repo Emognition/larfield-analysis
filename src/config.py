@@ -2,8 +2,13 @@ import logging
 import os
 from datetime import datetime
 
-DATASET_DIR = r"../data/larfield"
-QUALITY_MAPPING = {"Unacceptable": 0, "Barely acceptable": 0.5, "Excellent": 1}
+
+# === Default parameters ===
+DEFAULT_INPUT = os.getenv("DATASET_DIR", "../data/larfield")
+DEFAULT_OUTPUT = os.getenv("DATASET_DIR", "../data/larfield")
+DEFAULT_SAMPLING_RATE = 130
+DEFAULT_VERBOSE = False
+
 
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
