@@ -13,7 +13,7 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 from config import logger, DEFAULT_INPUT, DEFAULT_OUTPUT, DEFAULT_SAMPLING_RATE, DEFAULT_VERBOSE
-
+import signal_processing_python as spp
 
 def load_ecg_file(filepath: str) -> pd.Series | None:
     """Loads the ECG.csv file and returns the 'ecg' column or None if invalid."""
@@ -65,13 +65,13 @@ def calculate_snr(signal: np.ndarray, sampling_rate: int = 130) -> float:
 
 def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict[str, dict[str, float | str | None]]:
     """Evaluates signal quality using multiple methods from NeuroKit and BioSPPy libraries."""
-    results = {"NeuroKit": {}, "BioSPPy": {}, "SNR": {}}
+    results = {"NeuroKit": {}, "BioSPPy": {}, "SNR": {}, "SignalProcessingPython": {}}
 
     neurokit_cleaned = clean_signal_neurokit(signal, sampling_rate)
     neurokit_methods = ["zhao2018", "averageQRS", "templatematch"]
 
     biosppy_cleaned = clean_signal_biosppy(signal, sampling_rate)
-    biosppy_methods = ['Level3', 'pSQI', 'kSQI', 'fSQI']
+    biosppy_methods = ['Level3']
 
     for method in neurokit_methods:
         results["NeuroKit"][method] = calculate_quality(neurokit_cleaned, sampling_rate, method)
@@ -79,6 +79,8 @@ def evaluate_signal(signal: pd.Series, sampling_rate: int = 130) -> dict[str, di
     biosppy_results = quality_ecg(segment=biosppy_cleaned, methods=biosppy_methods, sampling_rate=sampling_rate, verbose=False)
     for i, method in enumerate(biosppy_methods):
         results["BioSPPy"][method] = biosppy_results[i]
+
+    results["SignalProcessingPython"]["ecg_quality"] = spp.good_quality_ecg(signal, 1100.0, 1.0,15.0)
 
     results["SNR"]["CustomSNR"] = calculate_snr(signal, sampling_rate)
 
