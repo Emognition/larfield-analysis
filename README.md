@@ -52,23 +52,37 @@ data/
     └── ...
 ```
    
-### `metrics.json` Proposal
+### `metrics.json`
 
 Each `metrics.json` file is stored in the root folder of a participant (`[person_hash]`) and contains quality metrics for each recorded `POLAR_...` session.  
 Example:
 
 ```json
 {
-  "ecg_signal_quality": {
-    "neurokit": 0.8,
-    "biosppy": 0.6
-  }
+    "ecg_signal_quality": {
+        "NeuroKit": {
+            "zhao2018": "Barely acceptable",
+            "averageQRS": 0.9896970940918103,
+            "templatematch": 0.9734324880490363
+        },
+        "BioSPPy": {
+            "Level3": 1.0,
+            "pSQI": 0.1423680605148544,
+            "kSQI": 29.26033779633734,
+            "fSQI": 0.5010238875453531
+        },
+        "SNR": {
+            "CustomSNR": 10.069691606156182
+        }
+    }
 }
 ```
 
 `metrics.json` — aggregated quality metrics for each session.
 
 # How to use:
+
+signal_processing_python module can be built by following the instructions at https://github.com/Emognition/signal-processing-python
 
 1. Place the **LarField** dataset in the `data/` folder and name it `larfield_zipped`
 2. Unzip the dataset into the `larfield/` folder by running: `python src/dataset_operations/unzip.py`
